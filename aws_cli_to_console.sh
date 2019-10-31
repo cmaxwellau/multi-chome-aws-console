@@ -21,7 +21,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-# 
+#
 
 set -e
 
@@ -79,15 +79,22 @@ fi
 
 SESSION_NAME="$(aws sts get-caller-identity  | jq -r .Arn | cut -f5- -d: | tr -cs 'a-zA-Z0-9\n' '-'  | tail -c 40)$(echo ${ROLE} | md5 | cut -c10)"
 #SESSION_NAME=
+echo "SESSION_NAME: ${SESSION_NAME}"
 
 echo Assuming IAM Role
-SESSION=$( aws sts assume-role --role-arn ${ROLE} --role-session-name ${SESSION_NAME} ${MFA_OPT} --query 'Credentials.{sessionId:AccessKeyId, sessionKey:SecretAccessKey, sessionToken:SessionToken}' | jq -r -c '@uri')
+SESSION=$( aws sts assume-role --role-arn ${ROLE} --role-session-name ${SESSION_NAME} ${MFA_OPT} --query '{"sessionId":Credentials.AccessKeyId,"sessionKey":Credentials.SecretAccessKey,"sessionToken":Credentials.SessionToken}')
 
 echo Getting Signin Token
-SIGNINTOKEN=$(curl --silent -X  GET "https://signin.aws.amazon.com/federation?Action=getSigninToken&SessionDuration=43200&Session=${SESSION}" | jq -r .SigninToken)
+SIGNINTOKEN=$( echo -n $SESSION  | tr -d '\n' \
+                                | sed -e 's/ //g'  -e 's/{/%7B/g' -e 's/}/%7D/g' \
+                                -e 's/"/%22/g' -e 's/,/%2C/g' -e 's/\//%2F/g' \
+                                -e 's/:/%3A/g' -e 's/=/%3D/g' -e 's/+/%2B/g' \
+                                | xargs printf '%s%s' "https://signin.aws.amazon.com/federation?Action=getSigninToken&Session=" \
+                                | xargs curl -s \
+                                | sed -e 's/.*:"\(.*\)".*/\1/' \
+                                | xargs printf '%s' '' )
 
 DESTINATION=$(rawurlencode "https://console.aws.amazon.com/" )
-#DESTINATION=$(rawurlencode "https://ap-southeast-2.console.aws.amazon.com/ec2/v2/home?region=ap-southeast-2" )
 
 URL="https://signin.aws.amazon.com/federation?Action=login&Issuer=${WHOAMI}&SigninToken=${SIGNINTOKEN}&Destination=${DESTINATION}"
 
@@ -114,6 +121,5 @@ if [ "${PLUGIN_ID}x" != "x" ] ; then
 EOF
 fi
 
-echo "Opening Console URL"
+echo -en "Opening Console URL:\n\n    ${URL}\n\n"
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --user-data-dir="${SESSION_DIR}" "${URL}" > /dev/null 2>&1 &
-
